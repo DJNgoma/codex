@@ -90,6 +90,7 @@ pub fn truncate_function_output_items_with_policy(
         TruncationPolicy::Tokens(_) => policy.token_budget(),
     };
     let mut omitted_text_items = 0usize;
+    let mut omitted_image_items = 0usize;
 
     for item in items {
         match item {
@@ -122,10 +123,22 @@ pub fn truncate_function_output_items_with_policy(
                 }
             }
             FunctionCallOutputContentItem::InputImage { image_url, detail } => {
-                out.push(FunctionCallOutputContentItem::InputImage {
-                    image_url: image_url.clone(),
-                    detail: *detail,
-                });
+                let cost = match policy {
+                    TruncationPolicy::Bytes(_) => image_url.len(),
+                    TruncationPolicy::Tokens(_) => {
+                        usize::try_from(approx_tokens_from_byte_count(image_url.len()))
+                            .unwrap_or(usize::MAX)
+                    }
+                };
+                if cost <= remaining_budget {
+                    out.push(FunctionCallOutputContentItem::InputImage {
+                        image_url: image_url.clone(),
+                        detail: *detail,
+                    });
+                    remaining_budget = remaining_budget.saturating_sub(cost);
+                } else {
+                    omitted_image_items += 1;
+                }
             }
             FunctionCallOutputContentItem::EncryptedContent { encrypted_content } => {
                 out.push(FunctionCallOutputContentItem::EncryptedContent {
@@ -138,6 +151,11 @@ pub fn truncate_function_output_items_with_policy(
     if omitted_text_items > 0 {
         out.push(FunctionCallOutputContentItem::InputText {
             text: format!("[omitted {omitted_text_items} text items ...]"),
+        });
+    }
+    if omitted_image_items > 0 {
+        out.push(FunctionCallOutputContentItem::InputText {
+            text: format!("[omitted {omitted_image_items} image items ...]"),
         });
     }
 

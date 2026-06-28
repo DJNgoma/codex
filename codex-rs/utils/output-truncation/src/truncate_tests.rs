@@ -306,6 +306,35 @@ fn truncate_function_output_items_with_policy_preserves_encrypted_content() {
 }
 
 #[test]
+fn truncate_function_output_items_with_policy_omits_images_over_budget() {
+    let items = vec![
+        FunctionCallOutputContentItem::InputText {
+            text: "ok".to_string(),
+        },
+        FunctionCallOutputContentItem::InputImage {
+            image_url: "data:image/png;base64,abcdefghijklmnopqrstuvwxyz".to_string(),
+            detail: Some(DEFAULT_IMAGE_DETAIL),
+        },
+    ];
+
+    for policy in [TruncationPolicy::Bytes(10), TruncationPolicy::Tokens(1)] {
+        let output = truncate_function_output_items_with_policy(&items, policy);
+
+        assert_eq!(
+            output,
+            vec![
+                FunctionCallOutputContentItem::InputText {
+                    text: "ok".to_string(),
+                },
+                FunctionCallOutputContentItem::InputText {
+                    text: "[omitted 1 image items ...]".to_string(),
+                },
+            ]
+        );
+    }
+}
+
+#[test]
 fn formatted_truncate_text_content_items_with_policy_merges_all_text_for_token_budget() {
     let items = vec![
         FunctionCallOutputContentItem::InputText {

@@ -24,6 +24,8 @@ const ORIGINAL_DETAIL_LIMITS: PromptImageResizeLimits = PromptImageResizeLimits 
     max_dimension: 6000,
     max_patches: 10_000,
 };
+const MAX_PREPARED_IMAGE_DATA_URL_BYTES: usize = 10 * 1024 * 1024;
+
 #[derive(Debug, thiserror::Error)]
 enum ImagePreparationError {
     #[error("remote image URLs are not supported")]
@@ -130,7 +132,17 @@ fn prepare_image(
         Some(ImageDetail::Low) => return Err(ImagePreparationError::UnsupportedLowDetail),
     };
     let image = load_data_url_for_prompt(image_url, PromptImageMode::ResizeWithLimits(limits))?;
-    *image_url = image.into_data_url();
+    let prepared_image_url = image.into_data_url();
+    if prepared_image_url.len() > MAX_PREPARED_IMAGE_DATA_URL_BYTES {
+        return Err(ImagePreparationError::Processing(
+            ImageProcessingError::ImageTooLarge {
+                representation: "prepared data URL",
+                size: prepared_image_url.len(),
+                max: MAX_PREPARED_IMAGE_DATA_URL_BYTES,
+            },
+        ));
+    }
+    *image_url = prepared_image_url;
     Ok(())
 }
 

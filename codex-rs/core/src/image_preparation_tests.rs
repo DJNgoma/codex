@@ -24,11 +24,65 @@ fn png_data_url(width: u32, height: u32) -> (String, Vec<u8>) {
     (data_url_from_bytes("image/png", &bytes), bytes)
 }
 
+fn noisy_png_data_url(width: u32, height: u32) -> String {
+    let image = ImageBuffer::from_fn(width, height, |x, y| {
+        Rgba([
+            (x.wrapping_mul(31) ^ y.wrapping_mul(17)) as u8,
+            (x.wrapping_mul(47) ^ y.wrapping_mul(29)) as u8,
+            (x.wrapping_mul(61) ^ y.wrapping_mul(43)) as u8,
+            255,
+        ])
+    });
+    let mut encoded = Cursor::new(Vec::new());
+    DynamicImage::ImageRgba8(image)
+        .write_to(&mut encoded, ImageFormat::Png)
+        .expect("encode noisy PNG");
+    data_url_from_bytes("image/png", &encoded.into_inner())
+}
+
 fn decoded_image(image_url: &str) -> (Vec<u8>, DynamicImage) {
     let (_, payload) = image_url.split_once(',').expect("data URL payload");
     let bytes = BASE64_STANDARD.decode(payload).expect("decode image URL");
     let image = image::load_from_memory(&bytes).expect("decode processed image");
     (bytes, image)
+}
+
+#[test]
+fn preparation_replaces_prepared_images_that_exceed_data_url_limit() {
+    let image_url = noisy_png_data_url(/*width*/ 2048, /*height*/ 2048);
+    let mut items = vec![ResponseItem::FunctionCallOutput {
+        id: None,
+        call_id: "call-1".to_string(),
+        output: FunctionCallOutputPayload {
+            body: FunctionCallOutputBody::ContentItems(vec![
+                FunctionCallOutputContentItem::InputImage {
+                    image_url,
+                    detail: Some(ImageDetail::High),
+                },
+            ]),
+            success: Some(true),
+        },
+        internal_chat_message_metadata_passthrough: None,
+    }];
+
+    prepare_response_items(&mut items);
+
+    assert_eq!(
+        items,
+        vec![ResponseItem::FunctionCallOutput {
+            id: None,
+            call_id: "call-1".to_string(),
+            output: FunctionCallOutputPayload {
+                body: FunctionCallOutputBody::ContentItems(vec![
+                    FunctionCallOutputContentItem::InputText {
+                        text: IMAGE_TOO_LARGE_PLACEHOLDER.to_string(),
+                    },
+                ]),
+                success: Some(true),
+            },
+            internal_chat_message_metadata_passthrough: None,
+        }]
+    );
 }
 
 #[test]
